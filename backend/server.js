@@ -1,24 +1,35 @@
 import express from 'express';
 import cors from 'cors';
 import 'dotenv/config';
-import { clerkMiddleware, requireAuth } from '@clerk/express'
+import { clerkMiddleware, getAuth } from '@clerk/express';
+
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 app.use(clerkMiddleware());
 
-app.get("/",(req,res)=>{
-    res.send("Server is Live!");
+app.get("/", (req, res) => {
+  res.send("Server is Live!");
+});
 
-})
-// authenticated routes
-app.use(requireAuth());
+// ✅ Custom protect middleware (replaces requireAuth)
+const protect = (req, res, next) => {
+  const { userId } = getAuth(req);
+console.log("Headers:", req.headers);
+console.log("UserId:", userId);
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  next();
+};
 
 
-const PORT = process.env.PORT || 3000
+app.use('/api/ai', protect, (await import('./routes/aiRoutes.js')).default);
 
-app.listen(PORT,()=>{
-    console.log(`Server is running on port ${PORT}`);
-}
-)
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
