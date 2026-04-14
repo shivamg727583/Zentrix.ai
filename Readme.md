@@ -1,1 +1,1 @@
-# Quick AI
+#Zentrix AI
