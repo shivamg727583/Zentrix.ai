@@ -7,27 +7,20 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
-app.use(clerkMiddleware());
+app.use(
+  clerkMiddleware({
+    secretKey: process.env.CLERK_SECRET_KEY,
+    publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
+  })
+);
 
 app.get("/", (req, res) => {
   res.send("Server is Live!");
 });
 
-// ✅ Custom protect middleware (replaces requireAuth)
-const protect = (req, res, next) => {
-  const { userId } = getAuth(req);
-console.log("Headers:", req.headers);
-console.log("UserId:", userId);
-  if (!userId) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
-  next();
-};
 
 
-app.use('/api/ai', protect, (await import('./routes/aiRoutes.js')).default);
-
+app.use('/api/ai', (await import('./routes/aiRoutes.js')).default);
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
