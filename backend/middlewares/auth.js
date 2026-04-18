@@ -10,7 +10,7 @@ export const auth = async (req, res, next) => {
     }
 
     const user = await clerkClient.users.getUser(userId);
-
+  
 
     const hasPremium = user.privateMetadata?.plan === "premium";
 

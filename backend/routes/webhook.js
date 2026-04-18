@@ -9,10 +9,8 @@ router.post("/", express.raw({ type: "application/json" }), async (req, res) => 
     const payload = req.body;
     const event = JSON.parse(payload.toString());
 
-    console.log("Webhook event:", event.type);
-    console.log("DATA:", event.data); // 🔥 debug
 
-    const userId = event.data?.customer_id; // ✅ FIX
+    const userId = event.data?.user_id; 
 
     if (!userId) {
       console.log("❌ No userId found");
@@ -23,21 +21,21 @@ router.post("/", express.raw({ type: "application/json" }), async (req, res) => 
       event.type === "subscription.created" ||
       event.type === "subscription.updated"
     ) {
-      await clerkClient.users.updateUserMetadata(userId, {
-        publicMetadata: {
-          plan: "premium",
-        },
-      });
+     await clerkClient.users.updateUserMetadata(userId, {
+  privateMetadata: {
+    plan: "premium",
+  },
+});
 
       console.log("✅ User upgraded to premium");
     }
 
     if (event.type === "subscription.deleted") {
-      await clerkClient.users.updateUserMetadata(userId, {
-        publicMetadata: {
-          plan: "free",
-        },
-      });
+     await clerkClient.users.updateUserMetadata(userId, {
+  privateMetadata: {
+    plan: "free",
+  },
+});
 
       console.log("❌ User downgraded to free");
     }
