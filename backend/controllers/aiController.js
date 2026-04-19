@@ -1,151 +1,138 @@
-import OpenAI from "openai";
-import sql from "../configs/db.js";
-import { clerkClient } from "@clerk/express";
-import axios from "axios";
-import {v2 as cloudinary} from 'cloudinary';
-const openai = new OpenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
-});
+import fs from "fs";
+import pdfParse from "pdf-parse";
 
+import { generateText } from "../services/ai.service.js";
+import {
+  generateImageFromPrompt,
+  removeBackground,
+  removeObject,
+} from "../services/image.service.js";
+import { saveCreation } from "../services/user.service.js";
+import {
+  articlePrompt,
+  blogTitlePrompt,
+  resumeReviewPrompt,
+} from "../utils/promptBuilder.js";
+import { success, error } from "../utils/responseHandler.js";
 
-
+// ARTICLE
 export const generateArticle = async (req, res) => {
   try {
     const { userId } = req.auth();
-
-    const user = await clerkClient.users.getUser(userId);
-
     const { prompt, length } = req.body;
-    const plan = req.plan;
-    const free_usage = req.free_usage;
-    if (plan !== "premium" && free_usage >= 10) {
-      return res
-        .status(403)
-        .json({
-          error: "You have reached your monthly limit for article generation.",
-        });
-    }
 
-    const response = await openai.chat.completions.create({
-      model: "gemini-3-flash-preview",
-      messages: [{ role: "user", content: prompt }],
-      extra_body: {
-        google: {
-          thinking_config: {
-            thinking_level: "high",
-            include_thoughts: true,
-          },
-        },
-      },
-      temperature: 0.7,
-      max_tokens: length,
+    const article = await generateText({
+      systemPrompt: articlePrompt(prompt),
+      userPrompt: prompt,
+      maxTokens: length,
     });
 
-    const article = response.choices[0].message.content;
+    await saveCreation(userId, prompt, article, "article");
+    await req.incrementUsage();
 
-    await sql`INSERT INTO creations(user_id,prompt,content,type) VALUES(${userId},${prompt},${article},'article')`;
-
-    if (plan !== "premium") {
-      await clerkClient.users.updateUserMetadata(userId, {
-        privateMetadata: {
-          free_usage: free_usage + 1,
-        },
-      });
-    }
-    res.json({ success: true, data: article });
-  } catch (error) {
-    console.error("Error generating article:", error);
-    res.status(500).json({ error: error.message });
+    success(res, article);
+  } catch (err) {
+    error(res, err);
   }
 };
 
+// BLOG TITLE
 export const generateBlogTitle = async (req, res) => {
   try {
     const { userId } = req.auth();
+    const { prompt } = req.body;
 
-    const user = await clerkClient.users.getUser(userId);
-
-    const { prompt, length } = req.body;
-    const plan = req.plan;
-    const free_usage = req.free_usage;
-    if (plan !== "premium" && free_usage >= 10) {
-      return res
-        .status(403)
-        .json({
-          error: "You have reached your monthly limit for article generation.",
-        });
-    }
-
-    const response = await openai.chat.completions.create({
-      model: "gemini-3-flash-preview",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.7,
-      max_tokens: length,
+    const titles = await generateText({
+      systemPrompt: blogTitlePrompt(prompt),
+      userPrompt: prompt,
     });
 
-   const generatedTitle = response.choices?.[0]?.message?.content;
+    await saveCreation(userId, prompt, titles, "blog_title");
+    await req.incrementUsage();
 
-if (!generatedTitle || generatedTitle.trim() === "") {
-  return res.status(500).json({
-    error: "Failed to generate content from AI",
-  });
-}
-
-    await sql`INSERT INTO creations(user_id,prompt,content,type) VALUES(${userId},${prompt},${generatedTitle},'blog_title')`;
-
-    if (plan !== "premium") {
-      await clerkClient.users.updateUserMetadata(userId, {
-        privateMetadata: {
-          free_usage: free_usage + 1,
-        },
-      });
-    }
-    res.json({ success: true, data: generatedTitle });
-  } catch (error) {
-    console.error("Error generating blog title:", error);
-    res.status(500).json({ error: error.message });
+    success(res, titles);
+  } catch (err) {
+    error(res, err);
   }
 };
 
+// IMAGE
 export const generateImages = async (req, res) => {
   try {
     const { userId } = req.auth();
-
-    const user = await clerkClient.users.getUser(userId);
-
     const { prompt, publish } = req.body;
-    const plan = req.plan;
-    if (plan !== "premium") {
-      return res
-        .status(403)
-        .json({
-          error: "You must be a premium user to generate images.",
-        });
+
+    const imageUrl = await generateImageFromPrompt(prompt);
+
+    await saveCreation(userId, prompt, imageUrl, "image", publish);
+    success(res, imageUrl);
+  } catch (err) {
+    error(res, err);
+  }
+};
+
+// REMOVE BG
+export const removeBgImage = async (req, res) => {
+  try {
+    const { userId } = req.auth();
+    const file = req.file;
+
+    const url = await removeBackground(file.path);
+
+    await saveCreation(userId, "remove background", url, "image");
+    success(res, url);
+  } catch (err) {
+    error(res, err);
+  }
+};
+
+// REMOVE OBJECT
+export const removeObjectImage = async (req, res) => {
+  try {
+    const { userId } = req.auth();
+    const file = req.file;
+    const { object } = req.body;
+
+    const url = await removeObject(file.path, object);
+
+    await saveCreation(
+      userId,
+      `remove ${object}`,
+      url,
+      "image"
+    );
+
+    success(res, url);
+  } catch (err) {
+    error(res, err);
+  }
+};
+
+// RESUME REVIEW (FIXED)
+export const resumeReview = async (req, res) => {
+  try {
+    const { userId } = req.auth();
+    const file = req.file;
+
+    if (file.mimetype !== "application/pdf") {
+      return res.status(400).json({ error: "Only PDF allowed" });
     }
 
-    const form = new FormData()
-form.append('prompt', prompt)
-const response = await axios.post('https://clipdrop-api.co/text-to-image/v1', form, {
-    headers: {
-        'Content-Type': 'multipart/form-data',
-        'x-api-key': process.env.CLIPDROP_API_KEY
-    },
-    responseType: 'arraybuffer'
-})
- 
- const base64Image = `data:image/png;base64,${Buffer.from(response.data, 'binary').toString('base64')}`;
-
- const {secure_url} = await cloudinary.uploader.upload(base64Image);
-
-
-
-    await sql`INSERT INTO creations(user_id,prompt,content,type,publish) VALUES(${userId},${prompt},${secure_url},'image',${publish ?? false} )`;
+    const buffer = fs.readFileSync(file.path);
 
    
-    res.json({ success: true, data: secure_url });
-  } catch (error) {
-    console.error("Error generating article:", error);
-    res.status(500).json({ error: error.message });
+    const parsed = await pdfParse(buffer);
+
+    const feedback = await generateText({
+      systemPrompt: resumeReviewPrompt(parsed.text),
+      userPrompt: "Review this resume",
+      maxTokens: 1000,
+    });
+
+    await saveCreation(userId, "resume review", feedback, "resume_review");
+
+    success(res, feedback);
+  } catch (err) {
+    error(res, err);
   }
 };
